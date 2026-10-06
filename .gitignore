@@ -1,2 +1,11 @@
 /docs/
 CLAUDE.md
+
+# Python
+.venv/
+__pycache__/
+
+# Secrets: never commit
+.env
+credentials.json
+token*.json
