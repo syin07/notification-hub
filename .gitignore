@@ -9,3 +9,8 @@ __pycache__/
 .env
 credentials.json
 token*.json
+
+# Local data: your emails stay on your machine
+*.db
+*.db-journal
+tokens/

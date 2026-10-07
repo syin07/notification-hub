@@ -19,15 +19,18 @@ def list_message_ids(service: Resource, max_results: int) -> list[str]:
 
 
 def get_message(service: Resource, message_id: str) -> dict:
-    """Fetch one message and return its sender, subject, arrival time (UTC) and body."""
+    """Fetch one message and return its sender, subject, arrival time (UTC), body and labels."""
     message = service.users().messages().get(userId="me", id=message_id, format="full").execute()
     payload = message["payload"]
+    label_ids = message.get("labelIds", [])
     return {
         "id": message["id"],
         "sender": _get_header(payload["headers"], "From"),
         "subject": _get_header(payload["headers"], "Subject"),
         "received": datetime.fromtimestamp(int(message["internalDate"]) / 1000, tz=timezone.utc),
         "body": _find_body(payload, "text/plain") or _find_body(payload, "text/html"),
+        "label_ids": label_ids,  # e.g. ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"]
+        "is_read": "UNREAD" not in label_ids,
     }
 
 
