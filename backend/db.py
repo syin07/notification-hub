@@ -73,3 +73,11 @@ def save_item(conn: sqlite3.Connection, account: str, message: dict) -> bool:
     return cursor.rowcount == 1
 
 
+def save_history_id(conn: sqlite3.Connection, account: str, history_id: str) -> None:
+    """Store the account's sync bookmark, replacing any older one."""
+    conn.execute(
+        "INSERT OR REPLACE INTO sync_state (account, history_id) VALUES (?, ?)",
+        (account, history_id),
+    )
+
+

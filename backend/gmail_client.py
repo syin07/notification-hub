@@ -18,6 +18,28 @@ def list_message_ids(service: Resource, max_results: int) -> list[str]:
     return [message["id"] for message in result.get("messages", [])]
 
 
+def list_all_message_ids(service: Resource, query: str) -> list[str]:
+    """Return the IDs of every message matching a Gmail search query, following all pages."""
+    message_ids = []
+    page_token = None  # no token means "first page"
+    while True:
+        result = (
+            service.users()
+            .messages()
+            .list(userId="me", q=query, maxResults=500, pageToken=page_token)
+            .execute()
+        )
+        message_ids.extend(message["id"] for message in result.get("messages", []))
+        page_token = result.get("nextPageToken")
+        if page_token is None:  # no more pages
+            return message_ids
+
+
+def get_profile(service: Resource) -> dict:
+    """Return the mailbox's profile, including "emailAddress" and its current "historyId"."""
+    return service.users().getProfile(userId="me").execute()
+
+
 def get_message(service: Resource, message_id: str) -> dict:
     """Fetch one message and return its sender, subject, arrival time (UTC), body and labels."""
     message = service.users().messages().get(userId="me", id=message_id, format="full").execute()
