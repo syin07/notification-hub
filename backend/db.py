@@ -52,6 +52,11 @@ def add_account(conn: sqlite3.Connection, email: str, token_path: Path) -> None:
     )
 
 
+def list_accounts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Return every registered account (email, token_path), sorted by email."""
+    return conn.execute("SELECT email, token_path FROM accounts ORDER BY email").fetchall()
+
+
 def save_item(conn: sqlite3.Connection, account: str, message: dict) -> bool:
     """Store one Gmail message (a dict from get_message).
     Return True if it was new, False if it was already stored."""

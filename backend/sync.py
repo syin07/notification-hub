@@ -1,4 +1,4 @@
-"""Sync one Gmail account's inbox into the SQLite database."""
+"""Sync every registered Gmail account's inbox into the SQLite database."""
 
 import sqlite3
 from pathlib import Path
@@ -7,7 +7,7 @@ from googleapiclient.discovery import Resource
 from googleapiclient.errors import HttpError
 
 import db
-from gmail_auth import get_credentials
+from gmail_auth import ReauthorizationNeeded, load_credentials
 from gmail_client import (
     build_service,
     get_message,
@@ -16,7 +16,6 @@ from gmail_client import (
     list_history,
 )
 
-TOKEN_PATH = Path(__file__).parent / "token.json"  # moves to tokens/<email>.json in Step 5
 FULL_SYNC_QUERY = "in:inbox newer_than:30d"
 
 
@@ -85,16 +84,33 @@ def sync_account(conn: sqlite3.Connection, service: Resource, account: str) -> i
 
 
 def main() -> None:
-    creds = get_credentials(TOKEN_PATH)
-    service = build_service(creds)
     conn = db.connect()
     try:
-        account = get_profile(service)["emailAddress"]
-        db.add_account(conn, account, TOKEN_PATH)
-        new_count = sync_account(conn, service, account)
-        print(f"{account}: {new_count} new emails")
-    except HttpError as error:
-        print(f"Gmail API error: {error}")
+        accounts = db.list_accounts(conn)
+        if not accounts:
+            print("No accounts yet: add one with add_account.py")
+            return
+
+        # One account's problem must not stop the others, so each is synced in its own try.
+        results = {}
+        for account in accounts:
+            email = account["email"]
+            print(f"\n== {email}")
+            try:
+                creds = load_credentials(Path(account["token_path"]))
+                new_count = sync_account(conn, build_service(creds), email)
+                results[email] = f"{new_count} new emails"
+            except ReauthorizationNeeded as error:
+                results[email] = f"skipped, {error}: run add_account.py and pick this account"
+            except HttpError as error:
+                # Throw away this account's half-finished sync, so the next account's
+                # commit doesn't save it without its bookmark.
+                conn.rollback()
+                results[email] = f"Gmail API error: {error}"
+
+        print("\nSummary")
+        for email, result in results.items():
+            print(f"  {email}: {result}")
     finally:
         conn.close()  # anything not committed is thrown away
 

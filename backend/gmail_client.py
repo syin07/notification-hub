@@ -16,17 +16,6 @@ def build_service(creds: Credentials) -> Resource:
     return build("gmail", "v1", credentials=creds)
 
 
-def list_message_ids(service: Resource, max_results: int) -> list[str]:
-    """Return the IDs of the newest messages in the mailbox."""
-    result = (
-        service.users()
-        .messages()
-        .list(userId="me", maxResults=max_results)
-        .execute(num_retries=NUM_RETRIES)
-    )
-    return [message["id"] for message in result.get("messages", [])]
-
-
 def list_all_message_ids(service: Resource, query: str) -> list[str]:
     """Return the IDs of every message matching a Gmail search query, following all pages."""
     message_ids = []
