@@ -73,6 +73,14 @@ def save_item(conn: sqlite3.Connection, account: str, message: dict) -> bool:
     return cursor.rowcount == 1
 
 
+def get_history_id(conn: sqlite3.Connection, account: str) -> str | None:
+    """Return the account's sync bookmark, or None if it has never been synced."""
+    row = conn.execute(
+        "SELECT history_id FROM sync_state WHERE account = ?", (account,)
+    ).fetchone()
+    return row["history_id"] if row else None
+
+
 def save_history_id(conn: sqlite3.Connection, account: str, history_id: str) -> None:
     """Store the account's sync bookmark, replacing any older one."""
     conn.execute(

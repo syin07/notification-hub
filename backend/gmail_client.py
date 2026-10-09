@@ -44,6 +44,35 @@ def list_all_message_ids(service: Resource, query: str) -> list[str]:
             return message_ids
 
 
+def list_history(service: Resource, start_history_id: str) -> tuple[list[str], str]:
+    """Return the IDs of messages added to the inbox since start_history_id, and the mailbox's
+    current historyId (the new bookmark). Gmail keeps about a week of history; for an older
+    start_history_id this raises HttpError with status 404."""
+    message_ids = []
+    page_token = None
+    while True:
+        result = (
+            service.users()
+            .history()
+            .list(
+                userId="me",
+                startHistoryId=start_history_id,
+                historyTypes=["messageAdded"],
+                labelId="INBOX",
+                maxResults=500,
+                pageToken=page_token,
+            )
+            .execute(num_retries=NUM_RETRIES)
+        )
+        for record in result.get("history", []):
+            for added in record.get("messagesAdded", []):
+                message_ids.append(added["message"]["id"])
+        page_token = result.get("nextPageToken")
+        if page_token is None:
+            # dict.fromkeys drops duplicate IDs and keeps the order.
+            return list(dict.fromkeys(message_ids)), result["historyId"]
+
+
 def get_profile(service: Resource) -> dict:
     """Return the mailbox's profile, including "emailAddress" and its current "historyId"."""
     return service.users().getProfile(userId="me").execute(num_retries=NUM_RETRIES)
