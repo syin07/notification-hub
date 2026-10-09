@@ -57,6 +57,14 @@ def list_accounts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT email, token_path FROM accounts ORDER BY email").fetchall()
 
 
+def has_item(conn: sqlite3.Connection, account: str, external_id: str) -> bool:
+    """Return True if this account's item with this external ID is already stored."""
+    row = conn.execute(
+        "SELECT 1 FROM items WHERE account = ? AND external_id = ?", (account, external_id)
+    ).fetchone()
+    return row is not None
+
+
 def save_item(conn: sqlite3.Connection, account: str, message: dict) -> bool:
     """Store one Gmail message (a dict from get_message).
     Return True if it was new, False if it was already stored."""

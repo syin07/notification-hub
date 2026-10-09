@@ -17,15 +17,23 @@ from gmail_client import (
 )
 
 FULL_SYNC_QUERY = "in:inbox newer_than:30d"
+BATCH_SIZE = 50
 
 
 def save_messages(
     conn: sqlite3.Connection, service: Resource, account: str, message_ids: list[str]
 ) -> int:
-    """Fetch and save each message. Return how many were new. The caller commits."""
-    print(f"Found {len(message_ids)} messages")
+    """Fetch and save each message that isn't stored yet. Return how many were new.
+
+    Commits every BATCH_SIZE messages, so a sync that fails partway keeps what it saved
+    and the next run skips those. The caller saves the bookmark and makes the last commit.
+    """
+    # Skipping stored messages is a quick local check; fetching them again is a Gmail call.
+    to_fetch = [m for m in message_ids if not db.has_item(conn, account, m)]
+    print(f"Found {len(message_ids)} messages, {len(to_fetch)} not stored yet")
+
     new_count = 0
-    for i, message_id in enumerate(message_ids, start=1):
+    for i, message_id in enumerate(to_fetch, start=1):
         try:
             message = get_message(service, message_id)
         except HttpError as error:
@@ -34,8 +42,9 @@ def save_messages(
             raise
         if db.save_item(conn, account, message):
             new_count += 1
-        if i % 50 == 0:
-            print(f"  {i}/{len(message_ids)}")
+        if i % BATCH_SIZE == 0:
+            conn.commit()
+            print(f"  {i}/{len(to_fetch)}")
     return new_count
 
 
@@ -47,7 +56,8 @@ def full_sync(conn: sqlite3.Connection, service: Resource, account: str) -> int:
     message_ids = list_all_message_ids(service, FULL_SYNC_QUERY)
     new_count = save_messages(conn, service, account, message_ids)
 
-    # Save the emails and the bookmark in one commit: either both are stored or neither is.
+    # Save the bookmark only after every email is saved. Emails without a bookmark are
+    # harmless (the next run skips them); a bookmark without its emails would lose them.
     db.save_history_id(conn, account, bookmark)
     conn.commit()
     return new_count
@@ -103,8 +113,8 @@ def main() -> None:
             except ReauthorizationNeeded as error:
                 results[email] = f"skipped, {error}: run add_account.py and pick this account"
             except HttpError as error:
-                # Throw away this account's half-finished sync, so the next account's
-                # commit doesn't save it without its bookmark.
+                # Throw away this account's unfinished batch, so the next account starts
+                # with a clean transaction. Committed batches stay; the next run skips them.
                 conn.rollback()
                 results[email] = f"Gmail API error: {error}"
 
