@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import Resource, build
 
+# On a rate limit (429 or 403) or a server error (5xx), the client library waits and retries,
+# doubling the wait each time (exponential backoff). Without this, the first one crashes the sync.
+NUM_RETRIES = 5
+
 
 def build_service(creds: Credentials) -> Resource:
     """Return a Gmail API client authorized with these credentials."""
@@ -14,7 +18,12 @@ def build_service(creds: Credentials) -> Resource:
 
 def list_message_ids(service: Resource, max_results: int) -> list[str]:
     """Return the IDs of the newest messages in the mailbox."""
-    result = service.users().messages().list(userId="me", maxResults=max_results).execute()
+    result = (
+        service.users()
+        .messages()
+        .list(userId="me", maxResults=max_results)
+        .execute(num_retries=NUM_RETRIES)
+    )
     return [message["id"] for message in result.get("messages", [])]
 
 
@@ -27,7 +36,7 @@ def list_all_message_ids(service: Resource, query: str) -> list[str]:
             service.users()
             .messages()
             .list(userId="me", q=query, maxResults=500, pageToken=page_token)
-            .execute()
+            .execute(num_retries=NUM_RETRIES)
         )
         message_ids.extend(message["id"] for message in result.get("messages", []))
         page_token = result.get("nextPageToken")
@@ -37,12 +46,17 @@ def list_all_message_ids(service: Resource, query: str) -> list[str]:
 
 def get_profile(service: Resource) -> dict:
     """Return the mailbox's profile, including "emailAddress" and its current "historyId"."""
-    return service.users().getProfile(userId="me").execute()
+    return service.users().getProfile(userId="me").execute(num_retries=NUM_RETRIES)
 
 
 def get_message(service: Resource, message_id: str) -> dict:
     """Fetch one message and return its sender, subject, arrival time (UTC), body and labels."""
-    message = service.users().messages().get(userId="me", id=message_id, format="full").execute()
+    message = (
+        service.users()
+        .messages()
+        .get(userId="me", id=message_id, format="full")
+        .execute(num_retries=NUM_RETRIES)
+    )
     payload = message["payload"]
     label_ids = message.get("labelIds", [])
     return {
