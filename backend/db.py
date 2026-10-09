@@ -5,7 +5,8 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "notification_hub.db"
 
-# While on SQLite, change the schema by editing this and deleting the .db file.
+# While on SQLite, change the schema by editing this and deleting the .db file. Once the
+# database holds AI results (Block 3), deleting it throws away paid LLM calls: migrate instead.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
     email       TEXT PRIMARY KEY,
@@ -17,14 +18,15 @@ CREATE TABLE IF NOT EXISTS items (
     source       TEXT NOT NULL,                     -- 'gmail' for now
     account      TEXT NOT NULL REFERENCES accounts(email),
     external_id  TEXT NOT NULL,                     -- the source's own message ID
+    thread_id    TEXT,                              -- the source's conversation ID
     sender       TEXT,
+    to_addrs     TEXT,                              -- the To header, as sent
+    cc_addrs     TEXT,                              -- the Cc header, as sent
     subject      TEXT,
-    body         TEXT,
+    body         TEXT,                              -- plain text; HTML-only emails are stripped
     received_at  TEXT NOT NULL,                     -- ISO 8601 in UTC
     is_read      INTEGER NOT NULL,                  -- 0 or 1
-    priority     INTEGER CHECK (priority BETWEEN 1 AND 5),  -- NULL until ranked (Block 3)
-    category     TEXT CHECK (category IN
-                     ('recruiting', 'school', 'newsletters', 'personal', 'other')),
+    labels       TEXT,                              -- comma-separated, as of the first save
     UNIQUE (account, external_id)
 );
 
@@ -70,18 +72,24 @@ def save_item(conn: sqlite3.Connection, account: str, message: dict) -> bool:
     Return True if it was new, False if it was already stored."""
     source = "gmail"  # for now
     external_id = message["id"]
+    thread_id = message["thread_id"]
     sender = message["sender"]
+    to_addrs = message["to"]
+    cc_addrs = message["cc"]
     subject = message["subject"]
     body = message["body"]
     received_at = message["received"].isoformat()
     is_read = message["is_read"]
+    labels = ",".join(message["label_ids"])
     cursor = conn.execute(
         """
         INSERT OR IGNORE INTO items
-            (source, account, external_id, sender, subject, body, received_at, is_read)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (source, account, external_id, thread_id, sender, to_addrs, cc_addrs,
+             subject, body, received_at, is_read, labels)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (source, account, external_id, sender, subject, body, received_at, is_read),
+        (source, account, external_id, thread_id, sender, to_addrs, cc_addrs,
+         subject, body, received_at, is_read, labels),
     )
     return cursor.rowcount == 1
 
