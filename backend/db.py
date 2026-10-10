@@ -1,6 +1,7 @@
 """SQLite storage: open the database and create the tables."""
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "notification_hub.db"
@@ -33,6 +34,32 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE TABLE IF NOT EXISTS sync_state (
     account     TEXT PRIMARY KEY REFERENCES accounts(email),
     history_id  TEXT NOT NULL
+);
+
+-- AI results, kept apart from the source data in items. One row per item, model and prompt
+-- version, so changing the prompt (a new version) re-runs deliberately and keeps old results.
+CREATE TABLE IF NOT EXISTS item_analysis (
+    id                 INTEGER PRIMARY KEY,
+    item_id            INTEGER NOT NULL REFERENCES items(id),
+    model              TEXT NOT NULL,
+    prompt_version     TEXT NOT NULL,
+    status             TEXT NOT NULL CHECK (status IN ('ok', 'failed')),
+    attempts           INTEGER NOT NULL,                 -- API calls made for this row
+    category           TEXT CHECK (category IN ('action_required', 'fyi', 'bulk')),
+    importance         INTEGER CHECK (importance BETWEEN 1 AND 5),
+    reason             TEXT,                             -- one line, grounded in the email
+    deadline           TEXT,                             -- YYYY-MM-DD, a date in Los Angeles
+    deadline_evidence  TEXT,                             -- the email's own words for the deadline
+    error              TEXT,                             -- why it failed; never email text
+    input_tokens       INTEGER NOT NULL,                 -- summed over all attempts
+    output_tokens      INTEGER NOT NULL,
+    analyzed_at        TEXT NOT NULL,                    -- ISO 8601 in UTC, of the last attempt
+    UNIQUE (item_id, model, prompt_version),
+    -- Never half-saved: a successful row has every required field.
+    CHECK (status = 'failed' OR (category IS NOT NULL AND importance IS NOT NULL
+                                 AND reason IS NOT NULL)),
+    -- No deadline without the words it came from.
+    CHECK ((deadline IS NULL) = (deadline_evidence IS NULL))
 );
 """
 
@@ -110,3 +137,69 @@ def save_history_id(conn: sqlite3.Connection, account: str, history_id: str) -> 
     )
 
 
+
+
+def items_to_classify(
+    conn: sqlite3.Connection, model: str, prompt_version: str, max_attempts: int, limit: int
+) -> list[sqlite3.Row]:
+    """Return up to `limit` items, newest first, that still need a result for this model and
+    prompt version: never tried, or failed fewer than max_attempts times."""
+    # LEFT JOIN keeps every item, with the analysis columns NULL where no row matches,
+    # so "a.id IS NULL" means "never tried with this model and prompt version".
+    return conn.execute(
+        """
+        SELECT items.id, items.account, items.sender, items.to_addrs, items.cc_addrs,
+               items.subject, items.body, items.received_at, items.labels
+        FROM items
+        LEFT JOIN item_analysis AS a
+            ON a.item_id = items.id AND a.model = ? AND a.prompt_version = ?
+        WHERE a.id IS NULL OR (a.status = 'failed' AND a.attempts < ?)
+        ORDER BY items.received_at DESC
+        LIMIT ?
+        """,
+        (model, prompt_version, max_attempts, limit),
+    ).fetchall()
+
+
+def save_analysis(
+    conn: sqlite3.Connection,
+    item_id: int,
+    model: str,
+    prompt_version: str,
+    result: dict | None,
+    error: str | None,
+    input_tokens: int,
+    output_tokens: int,
+) -> None:
+    """Store one classification attempt: a validated result, or None and the error.
+
+    A retry updates the item's failed row. A successful row is never overwritten, so an
+    item is never re-scored by accident; a new prompt version gets a new row instead."""
+    status = "ok" if result is not None else "failed"
+    result = result or {}
+    analyzed_at = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        INSERT INTO item_analysis
+            (item_id, model, prompt_version, status, attempts, category, importance, reason,
+             deadline, deadline_evidence, error, input_tokens, output_tokens, analyzed_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (item_id, model, prompt_version) DO UPDATE SET
+            status            = excluded.status,
+            attempts          = item_analysis.attempts + 1,
+            category          = excluded.category,
+            importance        = excluded.importance,
+            reason            = excluded.reason,
+            deadline          = excluded.deadline,
+            deadline_evidence = excluded.deadline_evidence,
+            error             = excluded.error,
+            input_tokens      = item_analysis.input_tokens + excluded.input_tokens,
+            output_tokens     = item_analysis.output_tokens + excluded.output_tokens,
+            analyzed_at       = excluded.analyzed_at
+        WHERE item_analysis.status = 'failed'
+        """,
+        (item_id, model, prompt_version, status,
+         result.get("category"), result.get("importance"), result.get("reason"),
+         result.get("deadline"), result.get("deadline_evidence"),
+         error, input_tokens, output_tokens, analyzed_at),
+    )
