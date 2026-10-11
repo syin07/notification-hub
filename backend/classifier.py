@@ -13,7 +13,9 @@ import anthropic
 MODEL = "claude-haiku-5-5"
 # Bump after any change to the prompt or the schema. Items are classified once per version,
 # so a new version is how you deliberately re-run (old results stay for comparison).
-PROMPT_VERSION = "v1"
+# v2 (Oct 10): rules from the first eval review. v3: dropped v2's "act before a date means the
+# day before" rule (it moved plain due dates a day early); info sessions are importance 4.
+PROMPT_VERSION = "v3"
 
 MAX_BODY_CHARS = 4000  # about 1,000-1,300 tokens; keeps each call cheap
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
@@ -99,26 +101,44 @@ know matter most to me.
 Pick exactly one:
 - action_required: I need to do something: reply, submit, sign up, pay, attend, fix, or \
 read something I'm required to read. Examples: an assignment or form is due, a recruiter asks \
-for my availability, a professor asks me a question, a bill or payment is due.
+for my availability, a professor asks me a question, a bill or payment is due, a real person \
+sent me a direct message on LinkedIn.
 - fyi: nothing to do, but it is about me or something I'm part of, so it's worth knowing. \
 Examples: a grade was posted, a course announcement, an order update, a receipt, an \
 application status update. News that would hurt me not to know is still fyi if there's \
 nothing to do; give it a high importance instead.
-- bulk: mass mail I could skip and lose nothing: advertisements, promotions, newsletters, \
-marketing, digests, social media notifications. "Register now" or "act fast" in mass mail is \
-still bulk, not action_required.
+- bulk: mass mail I could skip and lose nothing: advertisements, promotions, generic \
+newsletters, marketing, social media notifications (including connection requests and \
+"accepted your invitation"), surveys and feedback requests, contest announcements, and spam \
+quarantine digests.
+
+These rules override the definitions above:
+- Internship and job postings, recruiting events and info sessions relevant to software \
+engineering are fyi, even when mass-sent (Handshake digests, internship lists, company \
+events). They are action_required only if someone personally asks me to do something.
+- Anything about a course I'm enrolled in (instructors, Canvas, Piazza, course mailing lists) \
+is at least fyi. Digests, such as Piazza daily digests, are fyi even when they mention a \
+deadline.
+- A confirmation of something I most likely did myself is fyi: an app I authorized, an \
+address change, a card I requested, an application I submitted, a service I use changing \
+its name.
+- Optional asks are never action_required: "register if interested", surveys, contests, \
+events.
 </categories>
 
 <importance>
-How much it would cost me never to read this email:
-5: something real is at stake: a grade, an internship or job opportunity, money, account \
-access, housing, or a legal or school requirement.
-4: personal and important: a direct message from a professor, TA, recruiter or employer, or \
-a deadline that affects me.
-3: useful to me specifically: course announcements, updates on my own orders, \
-applications or accounts.
-2: mildly interesting: general campus news, events I might like.
-1: safe to ignore: ads, promotions, generic newsletters.
+How much it would cost me never to read this email. Use this one scale for every category; \
+don't rank emails only against others in the same category.
+5: an assignment, exam or form with a deadline (including a deadline mentioned in a digest), \
+money due, an internship or job offer or interview, account access, housing, or a legal or \
+school requirement.
+4: internship and job postings, recruiting events and info sessions relevant to me, a grade \
+posted, a direct message from a \
+professor, TA, recruiter or employer, or a change to when or where a class meets.
+3: other emails about my courses, a direct LinkedIn message from a person, updates on my own \
+orders or applications.
+2: confirmations of things I did myself, general campus news, events I might like.
+1: safe to ignore. Bulk mail is always 1 or 2.
 </importance>
 
 <deadlines>
@@ -126,6 +146,7 @@ Give a deadline only when the email states a date or day by which I must do some
 - Resolve relative dates ("Friday", "tomorrow") against the email's received date: "Friday" \
 means the first Friday on or after the received date.
 - Only give deadlines on or after the received date.
+- Deadlines for my own courses count even when they appear inside a digest.
 - If the date is vague ("soon", "end of the quarter") or you are unsure, use null.
 - Sale or offer end dates in promotions are not deadlines.
 - If there are several, give the earliest one I must act on.

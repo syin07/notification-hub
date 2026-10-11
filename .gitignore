@@ -16,4 +16,4 @@ token*.json
 tokens/
 
 # Hand labels of real emails (Block 3 eval): never commit
-backend/eval_labels.csv
+backend/eval_labels*.csv
