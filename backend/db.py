@@ -203,3 +203,39 @@ def save_analysis(
          result.get("deadline"), result.get("deadline_evidence"),
          error, input_tokens, output_tokens, analyzed_at),
     )
+
+
+def list_item_keys(conn: sqlite3.Connection, non_promotions_only: bool = False) -> list[sqlite3.Row]:
+    """Return (id, account, external_id) for every item, in an order that survives a rebuild of
+    the database (item ids don't). Optionally skip what Gmail labeled Promotions."""
+    # Commas around the label list make ",CATEGORY_PROMOTIONS," match only the whole label.
+    # COALESCE turns a missing label list into "", since NULL in a comparison matches nothing.
+    return conn.execute(
+        """
+        SELECT id, account, external_id FROM items
+        WHERE ? = 0 OR ',' || COALESCE(labels, '') || ',' NOT LIKE '%,CATEGORY_PROMOTIONS,%'
+        ORDER BY account, external_id
+        """,
+        (int(non_promotions_only),),
+    ).fetchall()
+
+
+def get_item(conn: sqlite3.Connection, account: str, external_id: str) -> sqlite3.Row | None:
+    """Return one item with the columns classifying it needs, or None if it isn't stored."""
+    return conn.execute(
+        """
+        SELECT id, account, sender, to_addrs, cc_addrs, subject, body, received_at, labels
+        FROM items WHERE account = ? AND external_id = ?
+        """,
+        (account, external_id),
+    ).fetchone()
+
+
+def get_analysis(
+    conn: sqlite3.Connection, item_id: int, model: str, prompt_version: str
+) -> sqlite3.Row | None:
+    """Return an item's analysis row for this model and prompt version, or None."""
+    return conn.execute(
+        "SELECT * FROM item_analysis WHERE item_id = ? AND model = ? AND prompt_version = ?",
+        (item_id, model, prompt_version),
+    ).fetchone()
